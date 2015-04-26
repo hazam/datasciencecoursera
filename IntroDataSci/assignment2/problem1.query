@@ -1,0 +1,9 @@
+--SELECT count(*) FROM frequency WHERE docid='10398_txt_earn';
+--SELECT count(term) FROM frequency WHERE docid='10398_txt_earn' AND count=1;
+SELECT count(*) FROM
+(SELECT term FROM frequency WHERE count = 1 AND docid='10398_txt_earn'
+UNION
+SELECT term FROM frequency WHERE count = 1 AND docid='925_txt_trade');
+--SELECT count(*) FROM frequency WHERE term='parliament';
+--SELECT docid,SUM(count) FROM frequency GROUP BY docid HAVING SUM(count) > 300;
+--SELECT count(f1.docid) FROM frequency f1, frequency f2 WHERE (f1.docid=f2.docid AND f1.term='transaction' AND f2.term='world');
