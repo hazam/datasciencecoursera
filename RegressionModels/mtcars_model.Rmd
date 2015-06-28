@@ -1,0 +1,144 @@
+---
+title: "Motor Trend Transmission Analysis"
+author: "Emanuele Di Saverio"
+date: "19 June 2015"
+output: html_document
+---
+
+### Executive Summary
+
+Analyzing the data by the Motor Trend magazine it's possible to design a linear model that supports the hypotesis that there is **positive effect** of ~1.9 mpg (Miles per Gallon) on the fuel consumption that is **statistically significantly** attributable to the **different transmission type** - automatic or manual.
+
+In more technical terms, we aim to esimate the *coefficient* $\beta_1,am$ which is the **amount of mpg change** that I could resonably expect when upgrading from automatic to manual gearshifting, leaving all other regressors constant.
+
+### Exploratory Analysis
+
+While the mtcars data is already in good form, we start by doing some preliminary preprocessing to get an idea of the data and format values in a readable way
+
+```{r}
+library(car); library(ggplot2); data(mtcars); correlationMatrix <- cor(mtcars);
+vifs <- vif(lm(mpg ~ ., data = mtcars))
+options(width=120); library(dplyr, warn.conflicts = F)
+names <- as.data.frame(row.names(mtcars)); colnames(names) <- c("name");
+mtcars <- mutate(bind_cols(names, mtcars), am = factor(am, labels =c("AUTO","MANUAL")))
+mtcars <- mutate(mtcars, vs = factor(vs, labels =c("VEE","STRAIGHT")))
+```
+
+This allows us to have proper factor variables and car name in the data frame (instead of named rows).
+
+Simple direct plot shows that there is some difference in the mpg among the two transmission modes.
+
+```{r fig.width=3, fig.height=3}
+g <- ggplot(mtcars, aes(x=factor(am), y=mpg))  + geom_boxplot() + geom_point(alpha = 0.5)
+g <- g + stat_summary(fun.y = mean, geom="point",colour="darkred", size=3)
+print(g + ylab("Miles per Gallon"))
+```
+
+But this difference may as well be correlated to the other factors involved, and that's what we're going to investigate.
+
+### Model Selection
+
+We're going to perform model selection by selecting different sets of regressors, trying to increase the amount of variance predicted by the model without increasing the variance of the estimated coefficients too much.
+
+To boostrap the model selection beyond the am regressor (which is part of the required questions to be answered), we can look at the correlation mpg vector.
+
+```{r}
+correlationMatrix["mpg",-1]
+```
+
+we can see that the regressor more correlated with the outcome are cyl, disp and wt. But these variables are also strongly correlated among themselves, so they are probably redundant to be included all in a linear model.
+
+This is also hinted by the Variance Inflaction Factors which are higher in value
+```{r}
+vifs
+```
+
+Let's first fit a baseline model, which ignores other regressors
+```{r}
+fitam <- lm(mpg ~ am, data = mtcars)
+```
+
+Every regressor added will increase the R-squared score of the model, but the more the new regressor is linearly dependent form the ones already in the model (collinear), the less effective it will be and it will just increse the variance of the estimated factors.
+
+We can try to include the terms more correlated to our outcome:
+
+```{r}
+fitam_wt <- lm(mpg ~ am + wt, data = mtcars)
+fitam_wt_cyl <- update(fitam_wt, mpg ~ am + wt + cyl)
+fitam_wt_cyl_hp <- update(fitam_wt_cyl, mpg ~ am + wt + cyl + hp)
+#P-values of fitam VS fitam_wt VS fitam_wt_cyl
+anova(fitam, fitam_wt, fitam_wt_cyl, fitam_wt_cyl_hp)["Pr(>F)"]
+vifs['hp']
+```
+
+Including hp does not make the model significantly different at $\alpha=0.05$ while still increasing variance ten-fold.
+
+Another possible strategy would be starting from the regressors less correlated to am, carb and qsec:
+
+```{r}
+fitam_wt_carb_qsec <- update(fitam_wt, mpg ~ am + wt + carb + qsec)
+anova(fitam, fitam_wt, fitam_wt_carb_qsec)
+```
+
+The anova tests indicate that is **appropriate to use a model** including:
+
+- Transmission
+- Weight
+- Number of Carburetors
+- Acceleration time
+
+```{r}
+summary(fitam_wt_carb_qsec)$coefficients
+```
+
+This allows us to have accurate estimation of the am **coefficient**, which is the amount of mpg change that I could resonably expect when upgrading from automatic to manual gearshifting, leaving all other regressors constant.
+
+The adjusted R-squared score for the model is also very good:
+```{r}
+summary(fitam_wt_carb_qsec)$adj.r.squared
+```
+
+### Diagnostics and Outliers
+
+We can inspect the model by plotting the residuals and Quantile plots, which show a good fit between the model and the data.
+
+```{r fig.width=6, fig.height=3}
+par(mfrow=c(1,2))
+plot(fitam_wt_carb_qsec, which=1)
+plot(fitam_wt_carb_qsec, which=2)
+```
+
+The plot highligh points 3, 17 and 18 as possible outliers. 17 and 18 are Chrysler Imperial, a very powerful car that has surprisingly low mpg, and Fiat 128, and italian car which may not fit the intended audience of Motor Trend magazine. 
+
+It may be safe to delete those two points, but we decide not to since the data set is very small and the point itself are still quite close to the rest.
+
+### Hypotheses Testing
+
+Using our model, fitted over the clean data, we associate statistical uncertainty to our findings via hypotheses testing:
+
+$H_0$ There is no difference in fuel consumption between and automatic and manual gearshifting
+
+$H_a$ There is statistically significant difference in fuel consumption between and automatic and manual gearshifting
+
+```{r}
+coeff <- summary(fitam_wt_carb_qsec)$coefficients
+delta <- coeff[2,1] + c(-1,1) * qt(.975,df = fitam_wt_carb_qsec$df) * coeff[2,2]
+delta
+```
+
+Given that the confidence interval doesn't include 0, we can reject $H_0$ at $\alpha=0.05$ and say with **95% percent confidence** that the using a manual transmission car over an automatic **improves** the fuel efficiency by
+```{r}
+coeff[2,1]
+```
+
+miles per gallon.
+
+### Notes
+
+In this analysis we applied the strategy of isolating regressors and removing collinearity, to find a good simple model to answer the question. We didn't explore the possibility of variables interacting with each other, since the data set is very small and the VIF very large. An example of such analysis would have included some residuals conditioning plot to check for example if the carburators influence of mpg change at different weights
+
+```{r fig.width=3, fig.height=4}
+coplot(mpg ~ carb | wt,panel=panel.smooth, mtcars)
+```
+
+Since the data set is small, is difficult to extract trends from charts like this. But if such a relationship would be highlights, we would have included interaction element `carb * wt` in the formula instead the only linear `carb + wt`.
